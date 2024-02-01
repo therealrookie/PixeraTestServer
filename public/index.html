@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Send JSON</title>
+</head>
+<body>
+    <p>{"jsonrpc": "2.0", "id": 27, "method": "Pixera.Compound.startFirstTimeline"}</p>
+    <form action="http://localhost:3000/send-json" method="post">
+        <input type="text" name="targetIP" placeholder="Target IP">
+        <input type="text" name="targetPort" placeholder="Target Port">
+        <textarea name="jsonData" placeholder="JSON Data"></textarea>
+        <button type="submit">Send JSON</button>
+      </form>
+</body>
+</html>
