@@ -28,6 +28,7 @@
         button {
             padding: 10px 15px;
             margin-right: 10px;
+            margin-top: 10px;
             border: none;
             border-radius: 5px;
             background-color: #007bff;
@@ -47,30 +48,53 @@
         button:focus {
             outline: none;
         }
+
+        .resource-div {
+            padding: 10px;
+            margin: 5px 0;
+            background: grey;
+            color: white;
+            cursor: pointer;
+        }
+
+        .resource-div.selected {
+            background: blue;
+        }
     </style>
 </head>
 
 <body>
     <label for="timeline">Timeline:</label>
     <select id="timeline" name="timeline">
-        <option value="0">0</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="4">4</option>
-        <option value="5">5</option>
-        <option value="6">6</option>
-        <option value="7">7</option>
-        <option value="8">8</option>
     </select>
 
-    <button onclick="sendCommand('play')">Play</button>
-    <button onclick="sendCommand('pause')">Pause</button>
-    <button onclick="sendCommand('stop')">Stop</button>
+
+    <button onclick="sendTransportMode('play')">Play</button>
+    <button onclick="sendTransportMode('pause')">Pause</button>
+    <button onclick="sendTransportMode('stop')">Stop</button>
+
+    <br>
+
+    <label for="layers">Layers:</label>
+    <select name="layers" id="layers">
+        <option value="0" clip="">0</option>
+    </select>
+
+    <div id="resources" style="margin-top: 20px;"></div>
+
+    <br>
+
+    <button onclick="createTimeline()">Create Timeline</button>
+
+    <br>
+
+    <button onclick="createLayer()">Create Layer</button>
+
 
     <script>
         window.onload = function () {
             fetchTimelines();
+            fetchResources();
         };
 
         function fetchTimelines() {
@@ -108,12 +132,130 @@
                 const option = new Option(timeline.name, timeline.handle);
                 dropdown.add(option);
             });
+            fetchLayers();
         }
 
-        function sendCommand(command) {
+        function fetchLayers() {
             const timelineHandle = document.getElementById('timeline').value;
-            let mode = 0;
+            fetch('/get-layers', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ handle: parseInt(timelineHandle) }),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    updateLayersDropdown(data.result); // Assuming 'data.result' is the array of layer handles
+                })
+                .catch(error => console.error('Error fetching layers:', error));
+        }
 
+        function updateLayersDropdown(layers) {
+            const dropdown = document.getElementById('layers');
+            layers.forEach(({ layerHandle, clipHandle }) => {
+                const option = new Option(`Layer ${dropdown.options.length}`, layerHandle);
+                option.setAttribute('clip', clipHandle); // Store the clip handle in the option
+                dropdown.add(option);
+            });
+        }
+
+        function fetchResources() {
+            fetch('/get-resources', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    displayResources(data.result); // Assuming 'data.result' is the array of resource handles
+                })
+                .catch(error => console.error('Error fetching resources:', error));
+        }
+
+        function displayResources(resources) {
+            const resourcesContainer = document.getElementById('resources');
+            resourcesContainer.innerHTML = ''; // Clear existing resources
+
+            resources.forEach((resource, index) => {
+                // Assuming 'resource' contains the resource handle
+                const resourceDiv = document.createElement('div');
+                resourceDiv.textContent = `Input ${index + 1}`;
+                resourceDiv.dataset.handle = resource; // Store the resource handle in the element
+                resourceDiv.style.padding = '10px';
+                resourceDiv.style.margin = '5px 0';
+                resourceDiv.style.background = 'grey';
+                resourceDiv.style.color = 'white';
+                resourceDiv.style.cursor = 'pointer';
+                // Apply CSS styles as before
+
+                resourceDiv.onclick = function () {
+                    // Reset all other divs to grey and set clicked one to blue as before
+                    const selectedLayerHandle = document.getElementById('layers').value; // Get the selected layer's handle
+                    const selectedResourceHandle = this.dataset.handle; // Get the clicked resource's handle
+
+                    // Reset all other divs to grey
+                    const allResources = resourcesContainer.childNodes;
+                    allResources.forEach(div => div.style.background = 'grey');
+
+                    // Set the clicked div to blue
+                    resourceDiv.style.background = 'blue';
+
+                    // Send the assignment request to the server
+                    fetch('/assign-resource', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            layerHandle: parseInt(selectedLayerHandle),
+                            resourceId: parseFloat(selectedResourceHandle), // Assuming the ID is a double
+                        }),
+                    })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Failed to assign resource');
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            console.log(data.message);
+                            // Optionally, indicate success to the user
+                        })
+                        .catch((error) => {
+                            console.error('Error:', error);
+                        });
+                };
+
+                resourcesContainer.appendChild(resourceDiv);
+            });
+        }
+
+        function sendTransportMode(command) {
+            const timelineHandle = document.getElementById('timeline').value;
+            const mode = switchTrnsprtMode(command);
+
+            fetch('/set-transport-mode', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    handle: parseInt(timelineHandle),
+                    mode: mode
+                }),
+            })
+                .then(response => {
+                    console.log('Transport mode updated successfully');
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function switchTrnsprtMode(command) {
+            let mode = 0;
             switch (command) {
                 case 'play':
                     mode = 1;
@@ -124,33 +266,64 @@
                 case 'stop':
                     mode = 3;
                     break;
+                default:
+                    mode = 0;
+                    break;
             }
+            return mode;
+        }
 
-            const data = {
-                "jsonrpc": "2.0",
-                "id": 375,
-                "method": "Pixera.Timelines.Timeline.setTransportMode",
-                "params": {
-                    "handle": parseInt(timelineHandle),
-                    "mode": mode
-                }
-            };
-
-            fetch('/send-json', {
+        function createTimeline() {
+            fetch('/create-timeline', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(data),
             })
-                .then(response => response.json())
+                .then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    }
+                    throw new Error('Failed to create timeline and layers');
+                })
                 .then(data => {
-                    console.log('Success:', data);
+                    console.log(data.message);
+                    alert(data.message); // Or handle the success in a more sophisticated way
                 })
                 .catch((error) => {
                     console.error('Error:', error);
                 });
+            fetchTimelines();
         }
+
+        function createLayer() {
+            const timelineHandle = document.getElementById('timeline').value;
+            fetch('/create-layer', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    handle: parseInt(timelineHandle),
+                }),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to create layer');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Layer and clip created successfully', data);
+                    updateLayersDropdown([data]); // Update this function to handle the new layer and clip
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+            fetchLayers();
+        }
+
+        document.getElementById('timeline').addEventListener('change', fetchLayers);
     </script>
 </body>
 
