@@ -1,70 +1,109 @@
 const express = require('express');
+const net = require('net'); // No need for WebSocket in this scenario
 const app = express();
 const port = 3000;
-const net = require('net');
 
-app.use(express.json()); // Middleware to parse JSON bodies
-
+app.use(express.json());
 app.use(express.static('public'));
+app.use(express.urlencoded({ extended: true }));
 
-app.use(express.urlencoded({ extended: true })); // For URL-encoded data
+app.get('/get-timelines', (req, res) => {
+  const targetIP = '10.10.10.49';
+  const targetPort = 1400;
+  const requestMessage = JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 341,
+    "method": "Pixera.Timelines.getTimelines"
+  }) + "0xPX";
 
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+  const client = new net.Socket();
+  client.connect(targetPort, targetIP, () => {
+    console.log('Requesting timeline data...');
+    client.write(requestMessage);
+  });
+
+  client.on('data', (data) => {
+    console.log('Received timeline data:', data.toString());
+    const responseData = JSON.parse(data.toString().replace('0xPX', ''));
+    res.json(responseData); // Send timelines back to the client
+    client.end();
+  });
+
+  client.on('error', (err) => {
+    console.error('Error:', err);
+    res.status(500).send('Failed to fetch timelines');
+  });
+});
+
+app.post('/get-timeline-name', (req, res) => {
+  const targetIP = '10.10.10.49';
+  const targetPort = 1400;
+  const handle = req.body.handle;
+  const requestMessage = JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 404,
+    "method": "Pixera.Timelines.Timeline.getTimelineInfosAsJsonString",
+    "params": { "handle": handle }
+  }) + "0xPX";
+
+  const client = new net.Socket();
+  client.connect(targetPort, targetIP, () => {
+    console.log(`Requesting name for timeline with handle ${handle}...`);
+    client.write(requestMessage);
+  });
+
+  client.on('data', (data) => {
+    //console.log('Received timeline name data:', data.toString());
+    // Extracting the JSON string and parsing it
+    const responseJson = JSON.parse(data.toString().replace('0xPX', ''));
+    // The result field is a JSON string, so parse it again to get an object
+    const timelineInfo = JSON.parse(responseJson.result);
+    // Now, extract the name from the timelineInfo object
+    const timelineName = timelineInfo.name;
+    console.log(timelineName);
+    res.json({ name: timelineName }); // Send timeline name back to the client
+    client.end();
+  });
+
+  client.on('error', (err) => {
+    console.error('Error:', err);
+    res.status(500).send('Failed to fetch timeline name');
+  });
 });
 
 app.post('/send-json', (req, res) => {
-  //console.log(req);
   const targetIP = '10.10.10.49';
   const targetPort = 1400;
-  const jsonData = {"jsonrpc": "2.0", "id": 27, "method": "Pixera.Compound.startFirstTimeline"};
-
-  // Debugging: Log the received data
-  console.log('Received data:', { targetIP, targetPort, jsonData });
-
-  // Basic validation
-  if (!targetIP || !targetPort) {
-    return res.status(400).send('Missing target IP or Port');
-  }
-
-  const dataToSend = JSON.stringify(jsonData) + "0xPX";
+  console.log(req.body)
+  const jsonData = parseJsonData(req.body);
 
   const client = new net.Socket();
-  client.connect(targetPort, targetIP, function () {
-    console.log('Connected');
-    client.write(dataToSend);
+  client.connect(targetPort, targetIP, () => {
+    console.log('Connected to TCP Server, sending data');
+    client.write(jsonData);
   });
 
-  client.on('timeout', () => {
-    console.log('Connection timed out');
-    client.end(); // Make sure to close the connection
-    res.status(504).send('Connection timed out');
+  client.on('data', (data) => {
+    console.log('Received response via TCP:', data.toString());
+    res.send('Received data: ' + data.toString());
+    client.end(); // Close the connection after receiving the response
   });
 
-  client.on('close', function () {
-    console.log('Connection closed');
-    res.send('JSON sent successfully');
+  client.on('close', () => {
+    console.log('TCP connection closed');
   });
 
-  client.on('error', function (err) {
-    console.error('Socket error:', err);
-    res.status(500).send('Socket error');
-  });
-});
-
-const tcpServer = net.createServer((socket) => {
-  console.log('TCP client connected');
-
-  socket.on('data', (data) => {
-    console.log('Received data:', data.toString());
-    // Process the data here
-  });
-
-  socket.on('end', () => {
-    console.log('TCP client disconnected');
+  client.on('error', (err) => {
+    console.error('TCP Client error:', err);
+    res.status(500).send('Failed to send JSON via TCP: ' + err.message);
   });
 });
 
-tcpServer.listen(4000, () => {
-  console.log('TCP Server listening on port 4000');
+app.listen(port, () => {
+  console.log(`Express server running at http://localhost:${port}`);
 });
+
+function parseJsonData(jsonData) {
+  const dataToSend = JSON.stringify(jsonData) + "0xPX";
+  return dataToSend;
+}

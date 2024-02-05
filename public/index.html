@@ -1,15 +1,157 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Send JSON</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 0;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+
+        label {
+            margin-right: 10px;
+        }
+
+        select {
+            padding: 5px 10px;
+            margin-right: 20px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            background-color: white;
+            outline: none;
+        }
+
+        button {
+            padding: 10px 15px;
+            margin-right: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:active {
+            background-color: #004099;
+        }
+
+        button:focus {
+            outline: none;
+        }
+    </style>
 </head>
+
 <body>
-    <p>{"jsonrpc": "2.0", "id": 27, "method": "Pixera.Compound.startFirstTimeline"}</p>
-    <form action="http://localhost:3000/send-json" method="post">
-        <input type="text" name="targetIP" placeholder="Target IP">
-        <input type="text" name="targetPort" placeholder="Target Port">
-        <textarea name="jsonData" placeholder="JSON Data"></textarea>
-        <button type="submit">Send JSON</button>
-      </form>
+    <label for="timeline">Timeline:</label>
+    <select id="timeline" name="timeline">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+    </select>
+
+    <button onclick="sendCommand('play')">Play</button>
+    <button onclick="sendCommand('pause')">Pause</button>
+    <button onclick="sendCommand('stop')">Stop</button>
+
+    <script>
+        window.onload = function () {
+            fetchTimelines();
+        };
+
+        function fetchTimelines() {
+            fetch('/get-timelines', { method: 'GET' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data); // For debugging
+                    const promises = data.result.map(handle => fetchTimelineName(handle));
+                    Promise.all(promises).then(timelines => {
+                        updateTimelineDropdown(timelines);
+                    });
+                })
+                .catch(error => console.error('Error fetching timelines:', error));
+        }
+
+        function fetchTimelineName(handle) {
+            return fetch('/get-timeline-name', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ handle }),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data);
+                    return { name: data.name, handle: handle }; // Return both name and handle
+                });
+        }
+
+        function updateTimelineDropdown(timelines) {
+            const dropdown = document.getElementById('timeline');
+            dropdown.innerHTML = ''; // Clear existing options
+            timelines.forEach(timeline => {
+                const option = new Option(timeline.name, timeline.handle);
+                dropdown.add(option);
+            });
+        }
+
+        function sendCommand(command) {
+            const timelineHandle = document.getElementById('timeline').value;
+            let mode = 0;
+
+            switch (command) {
+                case 'play':
+                    mode = 1;
+                    break;
+                case 'pause':
+                    mode = 2;
+                    break;
+                case 'stop':
+                    mode = 3;
+                    break;
+            }
+
+            const data = {
+                "jsonrpc": "2.0",
+                "id": 375,
+                "method": "Pixera.Timelines.Timeline.setTransportMode",
+                "params": {
+                    "handle": parseInt(timelineHandle),
+                    "mode": mode
+                }
+            };
+
+            fetch('/send-json', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Success:', data);
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+        }
+    </script>
 </body>
+
 </html>
