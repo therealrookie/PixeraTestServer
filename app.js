@@ -65,18 +65,31 @@ app.post('/create-layer', (req, res) => {
     const layerResult = JSON.parse(layerData.toString().replace('0xPX', ''));
     const layerHandle = layerResult.result; // Extract the layer handle
 
-    // After successfully creating the layer, create a clip at time 0.0
-    const requestMessageForClip = reqMsgCreateClipAtTime(layerHandle);
-    createTcpClient(requestMessageForClip, (clipData) => {
-      const clipResult = JSON.parse(clipData.toString().replace('0xPX', ''));
-      const clipHandle = clipResult.result; // Extract the clip handle
+    // Set the home screen for the layer
+    const screenName = "MC18H T2 Touring Frame"; // The screen name to be set as home screen
+    const requestMessageForHomeScreen = reqMsgSetHomeScreen(layerHandle, screenName);
 
-      console.log('Clip created successfully:', clipHandle);
-      res.json({ layerHandle: layerHandle, clipHandle: clipHandle }); // Send both handles back to the client
+    createTcpClient(requestMessageForHomeScreen, (homeScreenData) => {
+      console.log('Home screen set successfully for layer:', layerHandle);
+
+      // After successfully setting the home screen, create a clip at time 0.0
+      const requestMessageForClip = reqMsgCreateClipAtTime(layerHandle);
+      createTcpClient(requestMessageForClip, (clipData) => {
+        const clipResult = JSON.parse(clipData.toString().replace('0xPX', ''));
+        const clipHandle = clipResult.result; // Extract the clip handle
+
+        console.log('Clip created successfully:', clipHandle);
+        res.json({ layerHandle: layerHandle, clipHandle: clipHandle }); // Send both handles back to the client
+      }, (err) => {
+        console.error('Failed to create clip:', err);
+        res.status(500).send('Failed to create clip');
+      });
+
     }, (err) => {
-      console.error('Failed to create clip:', err);
-      res.status(500).send('Failed to create clip');
+      console.error('Failed to set home screen:', err);
+      res.status(500).send('Failed to set home screen');
     });
+
   }, (err) => {
     console.error('Failed to create layer:', err);
     res.status(500).send('Failed to create layer');
@@ -89,7 +102,31 @@ app.post('/get-layers', (req, res) => {
 
   createTcpClient(requestMessage, (data) => {
     console.log('Layers fetched successfully:', data.toString());
-    res.json(JSON.parse(data.toString().replace('0xPX', '')));
+    const layersResult = JSON.parse(data.toString().replace('0xPX', ''));
+    const layers = layersResult.result; // Assuming this is an array of layer handles
+
+    // Fetch the clip at index 0 for each layer
+    const clipPromises = layers.map(layerHandle =>
+      new Promise((resolveClip) => {
+        const clipRequestMessage = reqMsgGetClipAtIndex(layerHandle, 0); // Index 0 for the clip
+        createTcpClient(clipRequestMessage, (clipData) => {
+          const clipResult = JSON.parse(clipData.toString().replace('0xPX', ''));
+          resolveClip({ layerHandle, clipHandle: clipResult.result }); // Resolve with both handles
+        }, (err) => {
+          console.error('Failed to fetch clip for layer:', err);
+          resolveClip({ layerHandle, clipHandle: null }); // Resolve with null clipHandle on error
+        });
+      })
+    );
+
+    Promise.all(clipPromises)
+      .then(layersWithClips => {
+        res.json({ result: layersWithClips }); // Send an array of objects with layer and clip handles
+      })
+      .catch(err => {
+        console.error('Failed to fetch clips for layers:', err);
+        res.status(500).send('Failed to fetch clips for layers');
+      });
   }, (err) => {
     console.error('Failed to fetch layers:', err);
     res.status(500).send('Failed to fetch layers');
@@ -121,16 +158,74 @@ app.post('/get-resources', (req, res) => {
   });
 });
 
-app.post('/assign-resource', (req, res) => {
-  const { layerHandle, resourceId } = req.body;
-  const requestMessage = reqMsgAssignResource(layerHandle, resourceId);
+app.post('/test-assign', (req, res) => {
+
+  const { clipHandle, resourceId } = req.body;
+  console.log("clipHandle: ", clipHandle, "resourceId: ", resourceId); // Log the received JSON to the console
+  const requestMessage = reqMsgAssignResource(clipHandle, resourceId);
 
   createTcpClient(requestMessage, (data) => {
-    console.log('Resource assigned successfully');
-    res.json({ message: 'Resource assigned successfully' });
+    const testResult = JSON.parse(data.toString().replace('0xPX', ''));
+    console.log(testResult)
+    res.json({ result: 'hello back' });
   }, (err) => {
-    console.error('Failed to assign resource:', err);
-    res.status(500).send('Failed to assign resource');
+    console.error('Failed to create timeline:', err);
+    res.status(500).send('Failed to create timeline');
+  });
+
+});
+
+app.post('/assign-resource', (req, res) => {
+  const { clipHandle, resourceId: resourceHandle } = req.body; // resourceId is actually the handle
+  // First, convert resource handle to resource ID
+  const requestMessageForId = reqMsgGetResourceId(resourceHandle);
+
+  createTcpClient(requestMessageForId, (data) => {
+    const response = JSON.parse(data.toString().replace('0xPX', ''));
+    const resourceId = response.result; // This is the actual ID needed for assigning resource
+
+    // Now proceed to assign the resource to the clip with the obtained ID
+    const requestMessageForAssign = reqMsgAssignResource(clipHandle, resourceId);
+
+    createTcpClient(requestMessageForAssign, (assignData) => {
+      console.log("Response: ", JSON.parse(assignData.toString().replace('0xPX', '')));
+      res.json({ message: 'Resource assigned successfully' });
+    }, (assignErr) => {
+      console.error('Failed to assign resource:', assignErr);
+      res.status(500).send('Failed to assign resource');
+    });
+
+  }, (idErr) => {
+    console.error('Failed to get resource ID:', idErr);
+    res.status(500).send('Failed to get resource ID');
+  });
+});
+
+app.post('/set-offset', (req, res) => {
+  const { layerHandle, xOffset } = req.body;
+
+  // First, get current offsets
+  const requestMessageForGetOffsets = reqMsgGetOffsets(layerHandle);
+
+  createTcpClient(requestMessageForGetOffsets, (data) => {
+    const offsetsResponse = JSON.parse(data.toString().replace('0xPX', ''));
+    console.log("OffsetResponse: ", offsetsResponse);
+    const currentOffsets = offsetsResponse.result;
+
+    // Now, set new offsets with the updated x value
+    const requestMessageForSetOffsets = reqMsgSetOffsets(layerHandle, xOffset, ...currentOffsets.slice(1));
+
+    createTcpClient(requestMessageForSetOffsets, (setData) => {
+      console.log('Offset set successfully');
+      res.json({ message: 'Offset set successfully' });
+    }, (setErr) => {
+      console.error('Failed to set offset:', setErr);
+      res.status(500).send('Failed to set offset');
+    });
+
+  }, (getErr) => {
+    console.error('Failed to get current offsets:', getErr);
+    res.status(500).send('Failed to get current offsets');
   });
 });
 
@@ -249,12 +344,24 @@ function reqMsgGetResources(handle) {
   }) + "0xPX";
 }
 
-function reqMsgAssignResource(layerHandle, resourceId) {
+function reqMsgGetResourceId(resourceHandle) {
   return JSON.stringify({
     "jsonrpc": "2.0",
-    "id": 441,
-    "method": "Pixera.Timelines.Layer.assignResource",
-    "params": { "handle": layerHandle, "id": resourceId }
+    "id": 273, // Adjust the ID as necessary
+    "method": "Pixera.Resources.Resource.getId",
+    "params": { "handle": resourceHandle }
+  }) + "0xPX";
+}
+
+function reqMsgAssignResource(clipHandle, resourceId) {
+  return JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 487, // Ensure this ID is unique or managed according to your application's needs
+    "method": "Pixera.Timelines.Clip.assignResource",
+    "params": {
+      "handle": clipHandle,
+      "resId": resourceId // Note the parameter name change from 'id' to 'resId'
+    }
   }) + "0xPX";
 }
 
@@ -266,3 +373,54 @@ function reqMsgCreateClipAtTime(layerHandle) {
     "params": { "handle": layerHandle, "time": 0.0 }
   }) + "0xPX";
 }
+
+function reqMsgGetClipAtIndex(layerHandle, index) {
+  return JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 451, // Ensure unique ID for each request if needed
+    "method": "Pixera.Timelines.Layer.getClipAtIndex",
+    "params": { "handle": layerHandle, "index": index }
+  }) + "0xPX";
+}
+
+function reqMsgSetHomeScreen(layerHandle, screenName) {
+  return JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 456, // Ensure this ID is unique or managed according to your application's needs
+    "method": "Pixera.Timelines.Layer.setHomeScreenFromScreenName",
+    "params": {
+      "handle": layerHandle,
+      "screenName": screenName
+    }
+  }) + "0xPX";
+}
+
+function reqMsgSetOffsets(layerHandle, xOffset) {
+  return JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 464, // Adjust as needed
+    "method": "Pixera.Timelines.Layer.setOffsets",
+    "params": {
+      "handle": layerHandle,
+      "x": xOffset,
+      "y": 0.0, // Assuming other values are not changed
+      "z": 0.0,
+      "xr": 0.0,
+      "yr": 0.0,
+      "zr": 0.0,
+      "xScale": 1.0,
+      "yScale": 1.0,
+      "zScale": 1.0
+    }
+  }) + "0xPX";
+}
+
+function reqMsgGetOffsets(layerHandle) {
+  return JSON.stringify({
+    "jsonrpc": "2.0",
+    "id": 463, // Adjust as needed
+    "method": "Pixera.Timelines.Layer.getOffsets",
+    "params": { "handle": layerHandle }
+  }) + "0xPX";
+}
+
